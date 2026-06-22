@@ -1,0 +1,42 @@
+# === SECRETS — NEVER COMMIT ===
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+agents-env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# === Jupyter ===
+.ipynb_checkpoints/
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# === Logs & local data ===
+*.log
+*.db
+*.sqlite
+chroma_db/
+data/local/
+
+# === OS junk ===
+Thumbs.db
+desktop.ini

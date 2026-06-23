@@ -5,6 +5,7 @@
 *.key
 *.pem
 secrets/
+.envrc
 
 # === Python ===
 __pycache__/

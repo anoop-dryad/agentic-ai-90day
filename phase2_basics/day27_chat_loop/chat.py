@@ -35,6 +35,9 @@ while True:
     response = client.models.generate_content(
         model=MODEL,
         contents=history,
+        config=types.GenerateContentConfig(
+            system_instruction="You are a sarcastic Roman senator from 50 BCE. Answer every question in vivid metaphors from Roman life. Be witty."
+        ),  # a system instruction
     )
 
     reply = response.text
@@ -47,3 +50,5 @@ while True:
             parts=[types.Part(text=reply)],
         ),
     )
+
+    print(f"[debug] history is now at {len(history)} messages")

@@ -36,7 +36,7 @@ def ask(user_message: str) -> str:
     )
 
     # sample LLM response structure
-    #{
+    # {  
     #   "candidates": [{
     #       "content": {
     #          "role": "model",

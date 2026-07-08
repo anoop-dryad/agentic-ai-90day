@@ -37,6 +37,7 @@ build/
 *.sqlite
 chroma_db/
 data/local/
+logs/
 
 # === OS junk ===
 Thumbs.db

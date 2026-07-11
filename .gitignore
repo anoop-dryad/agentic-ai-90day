@@ -42,3 +42,6 @@ logs/
 # === OS junk ===
 Thumbs.db
 desktop.ini
+
+
+chroma_db/

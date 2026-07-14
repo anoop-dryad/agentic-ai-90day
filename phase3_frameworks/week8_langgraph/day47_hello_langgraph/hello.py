@@ -39,4 +39,13 @@ if __name__ == "__main__":
         result = agent.invoke(
             {"messages": [{"role": "user", "content": q}]}
         )
-        print(f"🤖 {result['messages'][-1].content}")
+        message = result['messages'][-1]
+        if isinstance(message.content, str):
+            answer = message.content
+        else:
+            answer = "".join(
+                part.get("text", "") for part in message.content
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+
+        print(f"🤖 {answer}")

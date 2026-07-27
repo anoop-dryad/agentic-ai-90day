@@ -31,8 +31,11 @@ MAX_DELEGATIONS = 4   # safety cap — supervisor's version of MAX_ITERATIONS
 
 class SupervisorState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
-    next_agent:str                                      # who the supervisor picked
-    findings:Annotated[list[str], operator.add]         # what specialists reported back
+    billing_messages: Annotated[list[BaseMessage], add_messages]
+    tech_messages: Annotated[list[BaseMessage], add_messages]
+    next_agent: str
+    findings: Annotated[list[str], operator.add]
+    consulted: Annotated[list[str], operator.add]
     delegation_count: Annotated[int, operator.add]
 
 model = ChatGoogleGenerativeAI(
@@ -51,103 +54,97 @@ def extract_text(message) -> str:
 
 SUPERVISOR_PROMPT = """You are a support supervisor coordinating specialist teams.
 
-Available specialists:
   billing  - invoices, payments, refunds, account balances
   tech     - error codes, bugs, outages, API and service status
 
-Your job: read the user's request and decide the NEXT step.
+Read the user's request and the findings so far, then decide the NEXT step.
 
-Respond with EXACTLY one word:
-  billing   - delegate to the billing team
-  tech      - delegate to the technical team
-  DONE      - enough information gathered; ready to answer the user
+Respond with EXACTLY one word: billing, tech, or DONE
 
 Rules:
-- If the request needs information from a team you haven't consulted yet, delegate to them.
-- If all needed information has been gathered, respond DONE.
-- Never delegate to the same team twice for the same question.
+- If a finding contains '[out of scope: X]', the request still needs the team that owns X.
+- Only answer DONE when every part of the user's request has been addressed by the
+  team that owns it.
 """
 
 def supervisor_node(state: SupervisorState) -> dict:
-    """Decide which specialist to delegate to, or that we're done."""
-
     if state.get("delegation_count", 0) >= MAX_DELEGATIONS:
         log.warning("supervisor: hit delegation cap — forcing DONE")
         return {"next_agent": "DONE"}
 
+    consulted = set(state.get("consulted", []))
+    available = [s for s in ("billing", "tech") if s not in consulted]
+
+    if not available:
+        log.info("supervisor: all specialists consulted → DONE")
+        return {"next_agent": "DONE"}
+
     user_msg = next(
-        (m for m in state["messages"] if isinstance(m, HumanMessage)), None
+        (m for m in state.get("messages", []) if isinstance(m, HumanMessage)), None
     )
-
     findings = state.get("findings", [])
-    context = f"User request: {user_msg.content if user_msg else '(none)'}\n\n"
 
+    context = f"User request: {user_msg.content if user_msg else '(none)'}\n\n"
     if findings:
         context += "Information gathered so far:\n"
-        context += "\n".join(f"- {f}" for f in findings)
-        context += "\n\n"
+        context += "\n".join(f"- {f}" for f in findings) + "\n\n"
     else:
         context += "No information gathered yet.\n\n"
-    context += "Next step (billing / tech / DONE):"
+    context += f"Specialists still available: {', '.join(available)}\n"
+    context += f"Next step ({' / '.join(available)} / DONE):"
 
     resp = model.invoke([
         SystemMessage(content=SUPERVISOR_PROMPT),
         HumanMessage(content=context),
     ])
-
     decision = extract_text(resp).strip().split()[0].lower()
 
-    if decision not in {"billing", "tech", "done"}:
-        decision = "done"
-    decision = "DONE" if decision == "done" else decision
+    if decision not in available:
+        decision = "DONE"
 
-    log.info(f"supervisor: decision → {decision} (findings so far: {len(findings)})")
-    return {"next_agent": decision}
+    log.info(f"supervisor: → {decision} (consulted: {consulted or 'none'})")
+    return {"next_agent": "DONE" if decision == "done" else decision}
 
-def make_specialist(name: str, system_prompt: str, tools: list):
-    """Build a specialist that runs its own tool loop, then reports a finding."""
+def make_specialist(name: str, channel: str, system_prompt: str, tools: list):
     bound = model.bind_tools(tools)
-    tool_node = ToolNode(tools)
+    tool_node = ToolNode(tools, messages_key=channel)
 
     def agent_fn(state: SupervisorState) -> dict:
         user_msg = next(
-            (m for m in state["messages"] if isinstance(m, HumanMessage)), None
+            (m for m in state.get("messages", []) if isinstance(m, HumanMessage)), None
         )
-        # Specialist sees: its own prompt + the user request + its own tool results
-        own_messages = [
-            m for m in state["messages"]
-            if isinstance(m, (AIMessage, ToolMessage))
-            and getattr(m, "name", None) in (None, name)
-        ]
+        own = state.get(channel, [])
         context = (
             [SystemMessage(content=system_prompt)]
             + ([user_msg] if user_msg else [])
-            + own_messages
+            + list(own)
         )
-        log.info(f"{name}: LLM call")
-        return {"messages": [bound.invoke(context)]}
+        log.info(f"{name}: LLM call ({len(own)} own msgs)")
+        return {channel: [bound.invoke(context)]}
 
     def tools_fn(state: SupervisorState) -> dict:
-        last = state["messages"][-1]
-        log.info(f"{name}: running {len(last.tool_calls)} tool call(s)") # type: ignore
+        own = state.get(channel, [])
+        if not own:
+            return {}
+        last = own[-1]
+        log.info(f"{name}: running {len(last.tool_calls)} tool call(s)")
         try:
             return tool_node.invoke(state)
         except Exception as e:
             log.warning(f"{name}: tool crashed: {e}")
-            return {"messages": [
+            return {channel: [
                 ToolMessage(content=f"Tool error: {e}", tool_call_id=c["id"])
-                for c in last.tool_calls # type: ignore
+                for c in last.tool_calls
             ]}
 
     def report_fn(state: SupervisorState) -> dict:
-        """Package what this specialist learned into a finding for the supervisor."""
-        last_ai = next(
-            (m for m in reversed(state["messages"]) if isinstance(m, AIMessage)), None
-        )
+        own = state.get(channel, [])
+        last_ai = next((m for m in reversed(own) if isinstance(m, AIMessage)), None)
         finding = f"[{name}] {extract_text(last_ai) if last_ai else 'no result'}"
-        log.info(f"{name}: reporting back")
+        log.info(f"{name}: finding = {finding[:150]}")
         return {
             "findings": [finding],
+            "consulted": [name],
             "delegation_count": 1,
         }
 
@@ -155,22 +152,30 @@ def make_specialist(name: str, system_prompt: str, tools: list):
 
 
 BILLING_PROMPT = (
-    "You are a billing specialist. Handle invoices, payments, balances. "
-    "Always call a tool for real data — never guess. "
+    "You are a billing specialist. You handle ONLY invoices, payments, and account balances. "
+    "Always call a tool for real data — never guess.\n\n"
+    "CRITICAL: If the request mentions anything outside billing — error codes, API status, "
+    "outages, technical issues — you MUST NOT answer that part. State exactly: "
+    "'[out of scope: <topic>]' and answer only the billing portion. "
+    "Never speculate about technical matters, even if you think you know.\n\n"
     "Answer concisely — your response goes to a supervisor, not the customer."
 )
 
 TECH_PROMPT = (
-    "You are a technical support specialist. Handle error codes, bugs, service status. "
-    "Always call a tool for real data — never guess. "
+    "You are a technical support specialist. You handle ONLY error codes, bugs, "
+    "outages, and service status. Always call a tool for real data — never guess.\n\n"
+    "CRITICAL: If the request mentions anything outside tech — invoices, payments, "
+    "balances, customer IDs — you MUST NOT answer that part. State exactly: "
+    "'[out of scope: <topic>]' and answer only the technical portion. "
+    "Never speculate about billing matters, even if you think you know.\n\n"
     "Answer concisely — your response goes to a supervisor, not the customer."
 )
 
 billing_agent, billing_tools, billing_report = make_specialist(
-    "billing", BILLING_PROMPT, BILLING_TOOLS
+    "billing", "billing_messages", BILLING_PROMPT, BILLING_TOOLS
 )
 tech_agent, tech_tools, tech_report = make_specialist(
-    "tech", TECH_PROMPT, TECH_TOOLS
+    "tech", "tech_messages", TECH_PROMPT, TECH_TOOLS
 )
 
 FINAL_PROMPT = (
@@ -209,13 +214,14 @@ def route_from_supervisor(state: SupervisorState) -> str: # type: ignore
     }[state["next_agent"]]
 
 
-def make_specialist_router(tools_name: str, report_name: str):
+def make_specialist_router(channel: str, tools_name: str, report_name: str):
     def route(state: SupervisorState) -> str:
-        last = state["messages"][-1]
-        if getattr(last, "tool_calls", None):
+        own = state.get(channel, [])
+        if own and getattr(own[-1], "tool_calls", None):
             return tools_name
         return report_name
     return route
+
 
 builder = StateGraph(SupervisorState)
 
@@ -230,15 +236,16 @@ builder.add_node("final_answer", final_answer_node)
 
 builder.add_edge(START, "supervisor")
 builder.add_conditional_edges("supervisor", route_from_supervisor)
-
-builder.add_conditional_edges(
-    "billing_agent", make_specialist_router("billing_tools", "billing_report")
-)
 builder.add_edge("billing_tools", "billing_agent")
+builder.add_conditional_edges(
+    "billing_agent",
+    make_specialist_router("billing_messages", "billing_tools", "billing_report"),
+)
 builder.add_edge("billing_report", "supervisor")      # ← report back
 
 builder.add_conditional_edges(
-    "tech_agent", make_specialist_router("tech_tools", "tech_report")
+    "tech_agent",
+    make_specialist_router("tech_messages", "tech_tools", "tech_report"),
 )
 builder.add_edge("tech_tools", "tech_agent")
 builder.add_edge("tech_report", "supervisor")         # ← report back

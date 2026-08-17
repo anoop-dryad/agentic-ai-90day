@@ -251,4 +251,4 @@ if __name__ == "__main__":
 #     assumption the customer didn't make. Retrieved right chunk by luck.
 #   - Fixes: (1) GATE decomposition on multi-part signals (Q3 had no "and").
 #            (2) Constrain rewrite prompt: fix typos only, add no assumptions.
-#   - Dryad risk: drift→confident wrong-question answer. Must gate+constrain.
+#   - risk: drift→confident wrong-question answer. Must gate+constrain.

@@ -189,3 +189,48 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ## Final result
+# 7/7 answer pass rate. Retrieval solid on answerable questions.
+# The number is trustworthy — but only because the eval itself was debugged
+# four times to get here (see below).
+
+# ## Eval bugs found and fixed (the eval was wrong, not the RAG)
+# 1. Chroma rejects empty metadata dict `{}` → use `{"source": p.name}`.
+# 2. `must_contain` literal-string matching failed a CORRECT answer:
+#    E429 answered "too many requests" where the test demanded "rate limit".
+#    Fix: grouped alternatives — `must_contain_any: [["rate limit", "too many requests"]]`
+#    (every group must match; any one alternative in a group satisfies it).
+# 3. Key renamed `must_contain` → `must_contain_any` in the data but not in
+#    `answer_correct` → `list.lower()` crash. Data shape and consumer drifted.
+#    Lesson: rename a data shape, grep every consumer. Golang/Pydantic catch
+#    this at the boundary; plain Python fails at runtime three functions deep.
+
+# ## OPEN ITEM — real finding, deferred to the production project
+# `reconnect_time`: eval reported retrieval MISS but answer PASS.
+# Investigation (printed the actual retrieved chunks) showed the MISS was REAL —
+# none of the top-3 chunks contained "sensor reconnects within 15 minutes".
+# The retriever ranked GATEWAY timing chunks (5 min re-establish, 10 min down)
+# above the SENSOR reconnect chunk, because "reconnect/connection/gateway/minutes"
+# cluster together in embedding space (the Day 62–63 near-miss problem).
+
+# => The correct-looking answer was likely UNGROUNDED (LLM reasoning/training,
+#    not retrieval). This is the "low retrieval / high answer" danger row from
+#    the Day 66 failure-mode decoder: an answer that looks right but isn't
+#    supported by what was retrieved. Benign on a toy KB; a real fabrication
+#    risk for the Dryad agent answering about a customer's actual device.
+
+# ## Requirements this surfaces for the production build
+# (a) GROUNDING CHECK: verify the answer's facts actually appear in the
+#     retrieved chunks — not just that the answer looks correct. "Answer correct"
+#     and "answer grounded" are different and can diverge silently.
+# (b) RETRIEVAL TUNING: stop semantically-near chunks (gateway timing) from
+#     crowding out the true chunk (sensor reconnect). Check first whether
+#     chunking severed the fact, or whether it's a ranking problem.
+
+# ## Diagnostic that caught it (reuse this reflex constantly in Phase 4)
+# When a metric disagrees with observed behavior, print what ACTUALLY happened
+# before trusting the number. The MISS looked like a marker bug; printing the
+# retrieved chunks proved it was a real retrieval failure hiding an ungrounded
+# answer. Trust the investigation, not the number.

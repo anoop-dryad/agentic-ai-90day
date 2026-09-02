@@ -2,7 +2,8 @@
 
 import requests
 
-BASE_URL = "http://localhost:8080/v1"
+from canopy_agent.config import settings
+
 TIMEOUT_SECONDS = 5
 
 
@@ -25,7 +26,7 @@ def get_device(device_id: str) -> GateResult:
     Returns GateResult, never raises — failures become ok=False,
     so the agent can honestly escalate instead of fabricating.
     """
-    url = f"{BASE_URL}/devices/{device_id}"
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}/{device_id}"
 
     try:
         resp = requests.get(url, timeout=TIMEOUT_SECONDS)
@@ -62,7 +63,7 @@ def get_device(device_id: str) -> GateResult:
 
 def list_devices() -> GateResult:
     """List all devices, gated the same way."""
-    url = f"{BASE_URL}/devices"
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}"
     try:
         resp = requests.get(url, timeout=TIMEOUT_SECONDS)
     except requests.RequestException as e:

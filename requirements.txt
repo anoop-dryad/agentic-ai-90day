@@ -45,6 +45,7 @@ httpx-sse==0.4.3
 huggingface_hub==1.23.0
 idna==3.18
 importlib_resources==7.1.0
+iniconfig==2.3.0
 instructor==1.15.4
 Jinja2==3.1.6
 jiter==0.14.0
@@ -104,6 +105,7 @@ pdfplumber==0.11.10
 pendulum==3.2.0
 pillow==12.3.0
 platformdirs==4.11.0
+pluggy==1.6.0
 portalocker==2.7.0
 posthog==5.4.0
 propcache==0.5.2
@@ -121,6 +123,8 @@ PyJWT==2.13.0
 pypdfium2==5.12.1
 PyPika==0.51.1
 pyproject_hooks==1.2.0
+pytest==9.1.1
+pytest-mock==3.15.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.32
@@ -131,6 +135,7 @@ regex==2026.1.15
 requests==2.34.2
 requests-oauthlib==2.0.0
 requests-toolbelt==1.0.0
+responses==0.26.3
 rich==14.3.4
 rpds-py==2026.6.3
 safetensors==0.8.0

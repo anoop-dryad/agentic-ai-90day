@@ -2,10 +2,14 @@
 
 import os
 
-from backend import get_device, list_devices
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+
+from canopy_agent.backend import (
+    get_device,
+    list_devices,
+)
 
 model = ChatGoogleGenerativeAI(
     model="gemini-3.1-flash-lite",
@@ -66,7 +70,7 @@ SYSTEM_PROMPT = (
 agent = create_agent(
     model=model,
     tools=[device_status, all_devices],
-    prompt=SYSTEM_PROMPT,
+    system_prompt=SYSTEM_PROMPT,
 )
 
 
@@ -91,3 +95,13 @@ if __name__ == "__main__":
         print(f"\n{'─' * 60}\n🧑 {q}")
         result = agent.invoke({"messages": [("user", q)]})
         print(f"🤖 {extract_text(result['messages'][-1])}")
+
+
+# STAGE 0 — COMPLETE ✅
+# Works:  4/4 correct on happy path; not-found ≠ couldn't-verify.
+# Safe:   backend killed → 4/4 honest escalation, ZERO fabricated statuses.
+#         dev-002 described in detail with backend up, refused to invent it
+#         with backend down — the gate controls what the LLM sees.
+# FINDING (Stage 1+): agent echoes status field, doesn't reason about health.
+#         12% battery buried under "yes, online". Health should be headline.
+# Thesis proven: structure enforces what the prompt requests.

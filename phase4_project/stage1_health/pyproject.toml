@@ -1,0 +1,20 @@
+[project]
+name = "canopy-agent-stage1"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["langchain", "langchain-google-genai", "langgraph", "requests"]
+
+[project.optional-dependencies]
+dev = ["pytest", "responses"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["llm: tests that call the real LLM (slow, needs API key)"]

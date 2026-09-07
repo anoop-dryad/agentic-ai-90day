@@ -1,0 +1,125 @@
+"""Backend client for the canopy device API. The gate lives here."""
+
+import requests
+
+from canopy_agent.config import settings
+
+
+class GateResult:
+    """The result of a gated backend call.
+
+    ok=True  → data is trustworthy, LLM may characterize it
+    ok=False → could NOT verify; LLM must NOT invent, agent escalates
+    """
+
+    def __init__(self, ok: bool, data: dict | None = None, reason: str = ""):
+        self.ok = ok
+        self.data = data
+        self.reason = reason
+
+
+def _headers() -> dict:
+    return {"X-API-Key": settings.API_KEY}
+
+
+def get_device(device_id: str) -> GateResult:
+    """Fetch a device and GATE the response.
+
+    Returns GateResult, never raises — failures become ok=False,
+    so the agent can honestly escalate instead of fabricating.
+    """
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}/{device_id}"
+
+    try:
+        resp = requests.get(
+            url,
+            headers=_headers(),
+            timeout=settings.BACKEND_TIMEOUT_SECONDS,
+        )
+    except requests.Timeout:
+        return GateResult(
+            False,
+            reason=f"backend timed out after {settings.BACKEND_TIMEOUT_SECONDS}s",
+        )
+    except requests.RequestException as e:
+        return GateResult(
+            False,
+            reason=f"backend unreachable: {e}",
+        )
+
+    if resp.status_code == 401:
+        return GateResult(
+            False,
+            reason="backend rejected credentials (401)",
+            data={"auth_failed": True},
+        )
+
+    # GATE 1: not found — a REAL answer ("this device doesn't exist"),
+    # distinct from "couldn't check". 404 with your structured error body.
+    if resp.status_code == 404:
+        return GateResult(
+            False,
+            reason=f"device '{device_id}' not found",
+            data={"not_found": True},
+        )
+
+    # GATE 2: any non-200 → could not verify
+    if resp.status_code != 200:
+        return GateResult(
+            False,
+            reason=f"backend returned status {resp.status_code}",
+        )
+
+    # GATE 3: body must parse and contain the fields we rely on
+    try:
+        body = resp.json()
+    except ValueError:
+        return GateResult(
+            False,
+            reason="backend returned invalid JSON",
+        )
+
+    required = {
+        "id",
+        "name",
+        "status",
+        "battery_pct",
+        "last_seen",
+    }
+    missing = required - body.keys()
+    if missing:
+        return GateResult(
+            False,
+            reason=f"backend response missing fields: {missing}",
+        )
+
+    # Passed every gate — data is trustworthy.
+    return GateResult(True, data=body)
+
+
+def list_devices() -> GateResult:
+    """List all devices, gated the same way."""
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}"
+    try:
+        resp = requests.get(
+            url,
+            headers=_headers(),
+            timeout=settings.BACKEND_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        return GateResult(False, reason=f"backend unreachable: {e}")
+
+    if resp.status_code == 401:
+        return GateResult(
+            False,
+            reason="backend rejected credentials (401)",
+            data={"auth_failed": True},
+        )
+    if resp.status_code != 200:
+        return GateResult(False, reason=f"backend returned status {resp.status_code}")
+    try:
+        body = resp.json()
+    except ValueError:
+        return GateResult(False, reason="backend returned invalid JSON")
+
+    return GateResult(True, data=body)

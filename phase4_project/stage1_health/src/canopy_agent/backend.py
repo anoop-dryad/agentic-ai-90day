@@ -27,6 +27,9 @@ def get_device(device_id: str) -> GateResult:
     so the agent can honestly escalate instead of fabricating.
     """
     url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}/{device_id}"
+    log.info(
+        "backend_call", extra={"data": {"tool": "get_device", "device_id": device_id}}
+    )
 
     try:
         resp = requests.get(url, timeout=TIMEOUT_SECONDS)

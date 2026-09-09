@@ -82,7 +82,10 @@ def get_logger() -> logging.Logger:
     log = logging.getLogger("canopy")
     if not log.handlers:
         log.setLevel(logging.INFO)
-        handler = logging.StreamHandler(sys.stderr)  # stderr: stdout is MCP's channel!
+        # StreamHandler should use sys.stderr instead of sys.stdout
+        # MCP server communicates over stdout (the protocol channel).
+        # If logs went to stdout, they'd corrupt the MCP messages and break the protocol.
+        handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(JsonFormatter())
         log.addHandler(handler)
     return log
@@ -96,3 +99,18 @@ def new_trace() -> str:
 
 
 log = get_logger()
+
+
+# ----------------------------- log data flow --------------------------------------------------
+
+# log.info(...)
+#    ↓
+# Python's logging creates a LogRecord (message="mcp_tool_call", data={...})
+#    ↓
+# the record goes to the handler (StreamHandler → stderr)
+#    ↓
+# the handler calls the formatter: JsonFormatter.format(record)
+#    ↓
+# format() builds the JSON and returns a string
+#    ↓
+# handler writes that string to stderr

@@ -7,6 +7,7 @@ a fabricated device status reaches a customer.
 
 import requests
 import responses
+
 from canopy_agent.backend import get_device
 from canopy_agent.config import settings
 

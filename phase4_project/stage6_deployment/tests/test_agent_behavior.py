@@ -6,6 +6,7 @@ import pytest
 import requests
 import responses
 from canopy_agent.agent import agent, extract_text
+
 from canopy_agent.config import settings
 
 # pytest -v -m "not llm" (instead of pytest -v) --> should be used if we need to skip the llm test

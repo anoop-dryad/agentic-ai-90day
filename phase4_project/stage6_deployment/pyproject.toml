@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "responses"]
+dev = ["pytest", "responses", "ruff"]
 
 [build-system]
 requires = ["setuptools>=68"]

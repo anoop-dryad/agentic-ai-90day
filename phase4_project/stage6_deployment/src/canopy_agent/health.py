@@ -2,7 +2,7 @@
 Deterministic and exhaustively testable. The LLM never decides health;
 it only describes what these functions compute."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from canopy_agent.config import settings
 
@@ -10,8 +10,7 @@ from canopy_agent.config import settings
 def parse_last_seen(last_seen: str) -> datetime | None:
     """Parse an RFC3339 timestamp. Returns None if unparseable."""
     try:
-        # handle both '...Z' and '+00:00' forms
-        return datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+        return datetime.fromisoformat(last_seen)
     except (ValueError, AttributeError):
         return None
 
@@ -35,7 +34,7 @@ def compute_health(device: dict) -> dict:
     # --- staleness ---
     last_seen = parse_last_seen(device.get("last_seen", ""))
     if last_seen is not None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         minutes = (now - last_seen).total_seconds() / 60
         flags["minutes_since_seen"] = round(minutes, 1)
         if minutes > settings.STALE_THRESHOLD_MINUTES:

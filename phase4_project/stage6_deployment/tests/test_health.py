@@ -1,6 +1,6 @@
 """Health judgment tests. Pure functions — fast, deterministic, exhaustive."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from canopy_agent.health import compute_health
 
@@ -10,7 +10,7 @@ def _iso(dt: datetime) -> str:
 
 
 def _recent(minutes_ago: float) -> str:
-    return _iso(datetime.now(timezone.utc) - timedelta(minutes=minutes_ago))
+    return _iso(datetime.now(UTC) - timedelta(minutes=minutes_ago))
 
 
 def test_healthy_device():

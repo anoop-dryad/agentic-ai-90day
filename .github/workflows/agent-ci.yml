@@ -1,7 +1,7 @@
 name: Agent CI
 
 on:
-    pull_request:
+    push:
         branches: [main]
 
 # so a new push to a PR cancels the previous run (saves CI minutes)

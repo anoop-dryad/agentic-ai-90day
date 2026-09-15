@@ -12,8 +12,8 @@ A self-directed 90-day project to design, build, and ship AI agents from first p
 | ----------------------------- | ----- | ------------------------------------------------------ | -------------- |
 | **1 — Foundations**           | 1–21  | Concepts, LLM internals, prompting, ReAct, memory, RAG | ✅ Complete    |
 | **2 — Hands-on Basics**       | 22–45 | Building agents from scratch in Python                 | ✅ Complete    |
-| **3 — Frameworks & Patterns** | 46–66 | LangGraph, CrewAI, advanced RAG                        | 🚧 In progress |
-| **4 — Production & Project**  | 67–90 | Evaluation, safety, deployment, shipping               | ⏳ Upcoming    |
+| **3 — Frameworks & Patterns** | 46–66 | LangGraph, CrewAI, advanced RAG                        | ✅ Complete    |
+| **4 — Production & Project**  | 67–90 | Evaluation, safety, deployment, shipping               | 🚧 In progress |
 
 ---
 

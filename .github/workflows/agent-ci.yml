@@ -14,7 +14,7 @@ jobs:
         runs-on: ubuntu-latest
         defaults:
             run:
-                working-directory: phase4_project/stage6_deployment
+                working-directory: phase4_project/stage7_streamlit
         steps:
             - uses: actions/checkout@v4
 
@@ -40,7 +40,7 @@ jobs:
         needs: lint-and-test # only build if lint+test passed
         defaults:
             run:
-                working-directory: phase4_project/stage6_deployment
+                working-directory: phase4_project/stage7_streamlit
         steps:
             - uses: actions/checkout@v4
 

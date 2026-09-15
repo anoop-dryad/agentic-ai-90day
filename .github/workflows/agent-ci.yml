@@ -32,8 +32,8 @@ jobs:
             - name: Format check (ruff)
               run: ruff format --check src/ tests/
 
-            - name: Test (skip LLM tests — no API key in CI)
-              run: pytest -m "not llm" -v
+            - name: Test
+              run: pytest -v
 
     docker-build:
         runs-on: ubuntu-latest

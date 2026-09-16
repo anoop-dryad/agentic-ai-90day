@@ -54,12 +54,17 @@ if question := st.chat_input("Ask about a device or Silvanet docs..."):
         st.markdown(question)
 
     # run the agent
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+    with st.chat_message("assistant"), st.spinner("Thinking..."):
+        try:
             answer, trace = asyncio.run(ask_once(question))
-        st.markdown(answer)
-        with st.expander("🔍 Execution trace", expanded=False):
-            _render_trace(trace)
+        except Exception as e:  # noqa: BLE001
+            answer = f"⚠️ Sorry, I hit an error: {type(e).__name__}. Please try again."
+            trace = []
+            st.error(answer)
+        else:
+            st.markdown(answer)
+            with st.expander("🔍 Execution trace", expanded=False):
+                _render_trace(trace)
 
     st.session_state.messages.append(
         {"role": "assistant", "content": answer, "trace": trace}

@@ -8,8 +8,10 @@ Gemini replaces Claude as the brain.
 """
 
 import json as _json
+import time
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -55,13 +57,7 @@ async def process_query(session, question: str) -> tuple[str, list[dict]]:
 
     MAX_ROUNDS = 5  # the loop cap — your MAX_ITERATIONS instinct
     for _ in range(MAX_ROUNDS):
-        resp = client.models.generate_content(
-            model=settings.MODEL_NAME,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT, tools=gemini_tools
-            ),
-        )
+        resp = _generate_with_retry(contents, gemini_tools)
         parts = resp.candidates[0].content.parts
         fn_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
 
@@ -123,3 +119,20 @@ async def ask_once(question: str) -> tuple[str, list[dict]]:
     ):
         await session.initialize()
         return await process_query(session, question)
+
+
+def _generate_with_retry(contents, gemini_tools, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return client.models.generate_content(
+                model=settings.MODEL_NAME,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT, tools=gemini_tools
+                ),
+            )
+        except genai_errors.ServerError:
+            if attempt < max_retries - 1:
+                time.sleep(5**attempt)  # backoff: 5s, 10s, 15s
+                continue
+            raise

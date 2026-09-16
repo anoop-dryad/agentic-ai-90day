@@ -10,6 +10,7 @@ dependencies = [
     "chromadb",
     "langchain-text-splitters",
     "mcp[cli]>=2.0,<3",
+    "streamlit",
 ]
 
 [project.optional-dependencies]

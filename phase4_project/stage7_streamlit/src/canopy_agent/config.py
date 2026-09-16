@@ -12,6 +12,7 @@ class Settings:
     STALE_THRESHOLD_MINUTES: float = float(os.getenv("STALE_THRESHOLD_MINUTES", "15"))
     LOW_BATTERY_PCT: int = int(os.getenv("LOW_BATTERY_PCT", "20"))
     API_KEY: str = os.getenv("CANOPY_API_KEY", "")
+    MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp")
 
 
 settings = Settings()

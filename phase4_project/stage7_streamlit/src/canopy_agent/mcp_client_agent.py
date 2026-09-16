@@ -7,7 +7,7 @@ https://modelcontextprotocol.io/docs/2026-07-28/develop/build-client
 Gemini replaces Claude as the brain.
 """
 
-import asyncio
+import json as _json
 
 from google import genai
 from google.genai import types
@@ -43,9 +43,11 @@ def _mcp_tools_to_gemini(mcp_tools):
     return [types.Tool(function_declarations=decls)]
 
 
-async def process_query(session, question: str) -> str:
+async def process_query(session, question: str) -> tuple[str, list[dict]]:
     new_trace()
-    log.info("query_start", extra={"data": {"question": question}})
+    trace: list[dict] = []  # ← collect events for the UI
+
+    trace.append({"step": "query", "detail": question})
 
     tool_list = await session.list_tools()
     gemini_tools = _mcp_tools_to_gemini(tool_list.tools)
@@ -66,8 +68,7 @@ async def process_query(session, question: str) -> str:
         # no tool calls → Gemini gave the final answer, we're done
         if not fn_calls:
             answer = "".join(p.text for p in parts if getattr(p, "text", None))
-            log.info("query_end", extra={"data": {"answer_preview": answer[:200]}})
-            return answer
+            return answer, trace
 
         # otherwise run the tools and loop again
         contents.append(resp.candidates[0].content)
@@ -78,6 +79,24 @@ async def process_query(session, question: str) -> str:
             )
             result = await session.call_tool(fc.name, dict(fc.args))
             result_text = "".join(b.text for b in result.content if hasattr(b, "text"))
+
+            # parse the tool result to extract gate/health info for the trace
+            try:
+                parsed = _json.loads(result_text)
+            except (ValueError, TypeError):
+                parsed = {}
+            trace.append(
+                {
+                    "step": "tool_call",
+                    "tool": fc.name,
+                    "args": dict(fc.args),
+                    "verified": parsed.get("verified"),
+                    "grounded": parsed.get("grounded"),
+                    "not_found": parsed.get("not_found"),
+                    "healthy": (parsed.get("health") or {}).get("healthy"),
+                }
+            )
+
             contents.append(
                 types.Content(
                     role="user",
@@ -91,29 +110,16 @@ async def process_query(session, question: str) -> str:
                 )
             )
 
-    # hit the cap without a final answer
-    log.warning("query_max_rounds", extra={"data": {"question": question}})
     return (
         "I gathered some information but couldn't complete a full answer — escalating."
     )
 
 
-async def main():
+async def ask_once(question: str) -> tuple[str, list[dict]]:
+    """One full query with its own connection. Streamlit-friendly."""
     async with (
-        streamable_http_client("http://localhost:8000/mcp") as (read, write),
+        streamable_http_client(settings.MCP_SERVER_URL) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
-        print("connected. tools:", [t.name for t in (await session.list_tools()).tools])
-
-        for q in [
-            "Is dev-001 online?",
-            "What does inactive status mean?",
-            "Why is dev-003 inactive?",
-            "What's the airspeed of a swallow?",
-        ]:
-            print(f"\n🧑 {q}\n🤖 {await process_query(session, q)}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        return await process_query(session, question)

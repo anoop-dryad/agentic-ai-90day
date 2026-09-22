@@ -1,0 +1,301 @@
+"""Backend client for the canopy device API. The gate lives here."""
+
+import requests
+
+from canopy_agent.config import settings
+from canopy_agent.confirmation import valid_confirmation_token
+from canopy_agent.observability import log
+
+
+class GateResult:
+    """The result of a gated backend call.
+
+    ok=True  → data is trustworthy, LLM may characterize it
+    ok=False → could NOT verify; LLM must NOT invent, agent escalates
+    """
+
+    def __init__(self, ok: bool, data: dict | None = None, reason: str = ""):
+        self.ok = ok
+        self.data = data
+        self.reason = reason
+
+
+def _headers() -> dict:
+    return {"X-API-Key": settings.API_KEY}
+
+
+def get_device(device_id: str) -> GateResult:
+    """Fetch a device and GATE the response.
+
+    Returns GateResult, never raises — failures become ok=False,
+    so the agent can honestly escalate instead of fabricating.
+    """
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}/{device_id}"
+    log.info(
+        "backend_call", extra={"data": {"tool": "get_device", "device_id": device_id}}
+    )
+
+    try:
+        resp = requests.get(
+            url,
+            headers=_headers(),
+            timeout=settings.BACKEND_TIMEOUT_SECONDS,
+        )
+    except requests.Timeout:
+        log.warning(
+            "gate_fail", extra={"data": {"device_id": device_id, "reason": "timeout"}}
+        )
+        return GateResult(
+            False,
+            reason=f"backend timed out after {settings.BACKEND_TIMEOUT_SECONDS}s",
+        )
+    except requests.RequestException as e:
+        log.warning(
+            "gate_fail",
+            extra={
+                "data": {
+                    "device_id": device_id,
+                    "reason": "unreachable",
+                    "detail": str(e),
+                }
+            },
+        )
+        return GateResult(
+            False,
+            reason=f"backend unreachable: {e}",
+        )
+
+    if resp.status_code == 401:
+        log.warning(
+            "gate_fail",
+            extra={
+                "data": {
+                    "device_id": device_id,
+                    "reason": "auth_failed",
+                    "status": 401,
+                }
+            },
+        )
+        return GateResult(
+            False,
+            reason="backend rejected credentials (401)",
+            data={"auth_failed": True},
+        )
+
+    # GATE 1: not found — a REAL answer ("this device doesn't exist"),
+    # distinct from "couldn't check". 404 with your structured error body.
+    if resp.status_code == 404:
+        log.info(
+            "gate_not_found", extra={"data": {"device_id": device_id, "status": 404}}
+        )
+        return GateResult(
+            False,
+            reason=f"device '{device_id}' not found",
+            data={"not_found": True},
+        )
+
+    # GATE 2: any non-200 → could not verify
+    if resp.status_code != 200:
+        log.warning(
+            "gate_fail",
+            extra={
+                "data": {
+                    "device_id": device_id,
+                    "reason": "bad_status",
+                    "status": resp.status_code,
+                }
+            },
+        )
+        return GateResult(
+            False,
+            reason=f"backend returned status {resp.status_code}",
+        )
+
+    # GATE 3: body must parse and contain the fields we rely on
+    try:
+        body = resp.json()
+    except ValueError:
+        return GateResult(
+            False,
+            reason="backend returned invalid JSON",
+        )
+
+    required = {
+        "id",
+        "name",
+        "status",
+        "battery_pct",
+        "last_seen",
+    }
+    missing = required - body.keys()
+    if missing:
+        return GateResult(
+            False,
+            reason=f"backend response missing fields: {missing}",
+        )
+
+    # Passed every gate — data is trustworthy.
+    log.info(
+        "gate_pass",
+        extra={"data": {"device_id": device_id, "status": body.get("status")}},
+    )
+    return GateResult(True, data=body)
+
+
+def list_devices() -> GateResult:
+    """List all devices, gated the same way."""
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}"
+    try:
+        resp = requests.get(
+            url,
+            headers=_headers(),
+            timeout=settings.BACKEND_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as e:
+        return GateResult(False, reason=f"backend unreachable: {e}")
+
+    if resp.status_code == 401:
+        return GateResult(
+            False,
+            reason="backend rejected credentials (401)",
+            data={"auth_failed": True},
+        )
+    if resp.status_code != 200:
+        return GateResult(False, reason=f"backend returned status {resp.status_code}")
+    try:
+        body = resp.json()
+    except ValueError:
+        return GateResult(False, reason="backend returned invalid JSON")
+
+    return GateResult(True, data=body)
+
+
+def send_downlink_to_backend(
+    device_id: str,
+    command: str,
+    confirmation_token: str,
+) -> GateResult:
+    """POST a downlink to the backend. Gated — failures become ok=False, never raises."""
+    url = f"{settings.BACKEND_BASE_URL}/{settings.DEVICE_PATH}/{device_id}/downlink"
+    log.info(
+        "downlink_call",
+        extra={
+            "data": {
+                "device_id": device_id,
+                "command": command,
+            }
+        },
+    )
+
+    # STRUCTURAL GATE: send is impossible without a valid token from propose
+    if not valid_confirmation_token(confirmation_token, device_id, command):
+        return {
+            "sent": False,
+            "reason": "missing or invalid confirmation — must propose first",
+        }
+
+    try:
+        resp = requests.post(
+            url,
+            json={"command": command},
+            headers=_headers(),
+            timeout=settings.BACKEND_TIMEOUT_SECONDS,
+        )
+    except requests.Timeout:
+        log.error(
+            "gate_fail", extra={"data": {"device_id": device_id, "reason": "timeout"}}
+        )
+        return GateResult(
+            False,
+            reason=f"backend timed out after {settings.BACKEND_TIMEOUT_SECONDS}s",
+        )
+    except requests.RequestException as e:
+        log.error(
+            "gate_fail",
+            extra={
+                "data": {
+                    "device_id": device_id,
+                    "reason": "unreachable",
+                    "detail": str(e),
+                }
+            },
+        )
+        return GateResult(
+            False,
+            reason=f"backend unreachable: {e}",
+        )
+
+    if resp.status_code == 401:
+        log.warning(
+            "gate_fail",
+            extra={
+                "data": {
+                    "device_id": device_id,
+                    "reason": "auth_failed",
+                    "status": 401,
+                }
+            },
+        )
+        return GateResult(
+            False,
+            reason="auth failed (401)",
+            data={"auth_failed": True},
+        )
+
+    # GATE 1: not found — a REAL answer ("this device doesn't exist"),
+    # distinct from "couldn't check". 404 with your structured error body.
+    if resp.status_code == 404:
+        log.info(
+            "gate_not_found",
+            extra={"data": {"device_id": device_id, "status": 404}},
+        )
+        return GateResult(
+            False,
+            reason=f"device '{device_id}' not found",
+            data={"not_found": True},
+        )
+
+    # GATE 2: not found — a REAL answer ("this device doesn't exist"),
+    # distinct from "couldn't check". 404 with your structured error body.
+    if resp.status_code == 400:
+        log.info(
+            "gate_fail",
+            extra={"data": {"device_id": device_id, "status": 400}},
+        )
+        return GateResult(
+            False,
+            reason="invalid command",
+            data={"invalid_command": True},
+        )
+
+    # GATE 3: any non (200,201) → could not verify
+    if resp.status_code not in (200, 201):
+        log.warning(
+            "gate_fail",
+            extra={
+                "data": {
+                    "device_id": device_id,
+                    "reason": "bad_status",
+                    "status": resp.status_code,
+                }
+            },
+        )
+        return GateResult(
+            False,
+            reason=f"backend returned status {resp.status_code}",
+        )
+
+    try:
+        body = resp.json()
+    except ValueError:
+        return GateResult(
+            False,
+            reason="backend returned invalid JSON",
+        )
+
+    # Passed every gate — data is trustworthy.
+    log.info(
+        "downlink_queued",
+        extra={"data": {"device_id": device_id, "status": body.get("status")}},
+    )
+    return GateResult(True, data=body)

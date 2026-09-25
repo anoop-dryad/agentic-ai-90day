@@ -5,8 +5,9 @@ Run: python scripts/downlink_smoke.py"""
 import asyncio
 import json
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from canopy_agent.config import settings
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 
 def parse(r):
@@ -22,13 +23,8 @@ def parse(r):
 
 
 async def main():
-    server_params = StdioServerParameters(
-        command="python",
-        args=["-m", "canopy_agent.mcp_server"],
-        env=None,
-    )
     async with (
-        stdio_client(server_params) as (read, write),
+        streamable_http_client(settings.MCP_SERVER_URL) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
@@ -41,7 +37,7 @@ async def main():
         p = parse(r)
         print("\n[propose valid]   ", p)
         assert p["proposable"] is True, "valid propose should be proposable"
-        token = p.get("confirmation_token")
+        token = p.get("token")
         assert token, "propose must return a confirmation_token"
 
         # 2. propose invalid command — should reject with valid_commands list

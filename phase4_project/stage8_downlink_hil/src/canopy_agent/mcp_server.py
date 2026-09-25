@@ -8,7 +8,7 @@ import uvicorn
 from mcp.server import MCPServer
 
 from canopy_agent.backend import get_device, send_downlink_to_backend
-from canopy_agent.confirmation import make_confirmation_token, valid_confirmation_token
+from canopy_agent.confirmation import make_confirmations_token, valid_confirmation_token
 from canopy_agent.health import compute_health
 from canopy_agent.observability import log, new_trace
 from canopy_agent.rag import search_docs_gated
@@ -147,7 +147,7 @@ def propose_downlink(device_id: str, command: str) -> dict:
         }
 
     device = result.data
-    token = make_confirmation_token(device_id, command)  # signed/hashed, short TTL
+    token = make_confirmations_token(device_id, command)  # signed/hashed, short TTL
     return {
         "proposable": True,
         "device_id": device["id"],
@@ -182,7 +182,11 @@ def send_downlink(device_id: str, command: str, confirmation_token: str) -> dict
             "reason": "missing or invalid confirmation — must propose first",
         }
 
-    result = send_downlink_to_backend(device_id, command)
+    result = send_downlink_to_backend(
+        device_id,
+        command,
+        confirmation_token=confirmation_token,
+    )
     if not result.ok:
         return {
             "sent": False,

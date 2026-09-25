@@ -45,11 +45,12 @@ def _mcp_tools_to_gemini(mcp_tools):
     return [types.Tool(function_declarations=decls)]
 
 
-async def process_query(session, question: str) -> tuple[str, list[dict]]:
+async def process_query(session, question: str) -> tuple[str, list[dict], dict | None]:
+    """Returns (answer, trace, pending_downlink).
+    pending_downlink is set if the LLM proposed one this turn — else None."""
     new_trace()
-    trace: list[dict] = []  # ← collect events for the UI
-
-    trace.append({"step": "query", "detail": question})
+    trace = []
+    pending = None  # ← capture a proposal if it happens
 
     tool_list = await session.list_tools()
     gemini_tools = _mcp_tools_to_gemini(tool_list.tools)
@@ -57,30 +58,37 @@ async def process_query(session, question: str) -> tuple[str, list[dict]]:
 
     MAX_ROUNDS = 5  # the loop cap — your MAX_ITERATIONS instinct
     for _ in range(MAX_ROUNDS):
-        resp = _generate_with_retry(contents, gemini_tools)
+        resp = _generate_with_retry(contents, gemini_tools)  # your retry wrapper
         parts = resp.candidates[0].content.parts
         fn_calls = [p.function_call for p in parts if getattr(p, "function_call", None)]
 
-        # no tool calls → Gemini gave the final answer, we're done
         if not fn_calls:
             answer = "".join(p.text for p in parts if getattr(p, "text", None))
-            return answer, trace
+            return answer, trace, pending
 
-        # otherwise run the tools and loop again
         contents.append(resp.candidates[0].content)
         for fc in fn_calls:
-            log.info(
-                "mcp_tool_call",
-                extra={"data": {"tool": fc.name, "args": dict(fc.args)}},
-            )
             result = await session.call_tool(fc.name, dict(fc.args))
             result_text = "".join(b.text for b in result.content if hasattr(b, "text"))
+            parsed = _json.loads(result_text) if result_text else {}
 
-            # parse the tool result to extract gate/health info for the trace
-            try:
-                parsed = _json.loads(result_text)
-            except (ValueError, TypeError):
-                parsed = {}
+            # ── DETECT A PROPOSAL ──
+            if fc.name == "propose_downlink" and parsed.get("proposable"):
+                pending = {
+                    "device_id": parsed["device_id"],
+                    "command": parsed["command"],
+                    "token": parsed["token"],
+                }
+                log.info(
+                    "downlink_proposed",
+                    extra={
+                        "data": {
+                            "device_id": pending["device_id"],
+                            "command": pending["command"],
+                        }
+                    },
+                )
+
             trace.append(
                 {
                     "step": "tool_call",
@@ -106,12 +114,10 @@ async def process_query(session, question: str) -> tuple[str, list[dict]]:
                 )
             )
 
-    return (
-        "I gathered some information but couldn't complete a full answer — escalating."
-    )
+    return "Couldn't complete.", trace, pending
 
 
-async def ask_once(question: str) -> tuple[str, list[dict]]:
+async def ask_once(question: str) -> tuple[str, list[dict], dict | None]:
     """One full query with its own connection. Streamlit-friendly."""
     async with (
         streamable_http_client(settings.MCP_SERVER_URL) as (read, write),
@@ -136,3 +142,33 @@ def _generate_with_retry(contents, gemini_tools, max_retries=3):
                 time.sleep(5**attempt)  # backoff: 5s, 10s, 15s
                 continue
             raise
+
+
+async def confirm_and_send(pending: dict) -> dict:
+    """Send the downlink directly with the stored token. No LLM involved —
+    this is the human's confirmation turned into a gated tool call."""
+    new_trace()
+    log.info(
+        "downlink_confirmed",
+        extra={
+            "data": {"device_id": pending["device_id"], "command": pending["command"]}
+        },
+    )
+
+    async with (
+        streamable_http_client(settings.MCP_SERVER_URL) as (read, write),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
+        r = await session.call_tool(
+            "send_downlink",
+            {
+                "device_id": pending["device_id"],
+                "command": pending["command"],
+                "confirmation_token": pending["token"],
+            },
+        )
+        import json as _json
+
+        text = "".join(b.text for b in r.content if hasattr(b, "text"))
+        return _json.loads(text) if text else {}

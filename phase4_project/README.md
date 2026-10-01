@@ -1,6 +1,6 @@
 # canopy
 
-**A production-grade agentic support agent for the Dryad Silvanet wildfire-detection network.**
+**A production-grade agentic support agent for the wildfire-detection network.**
 
 Canopy answers support questions about real IoT devices, searches real documentation, and can issue control commands back to hardware — but it is built on one non-negotiable rule: **the LLM is never trusted to invent facts, and it is never trusted to perform a write on its own.**
 
